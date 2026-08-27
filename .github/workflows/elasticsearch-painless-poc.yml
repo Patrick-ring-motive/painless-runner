@@ -1,0 +1,52 @@
+name: Elasticsearch Painless POC
+
+on:
+  workflow_dispatch:
+
+jobs:
+  painless-poc:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull Elasticsearch image
+        run: docker pull docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+
+      - name: Run Elasticsearch container
+        run: |
+          docker run -d --name es \
+            -p 9200:9200 \
+            -e discovery.type=single-node \
+            -e xpack.security.enabled=false \
+            -e ES_JAVA_OPTS="-Xms512m -Xmx512m" \
+            docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+
+      - name: Wait for Elasticsearch to be ready
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9200 >/dev/null; then
+              echo "Elasticsearch is up"
+              break
+            fi
+            echo "Waiting for Elasticsearch... ($i)"
+            sleep 5
+          done
+          curl -sf http://localhost:9200 || (echo "Elasticsearch failed to start"; docker logs es; exit 1)
+
+      - name: Execute Painless script
+        run: |
+          curl -s -X POST "http://localhost:9200/_scripts/painless/_execute" \
+            -H 'Content-Type: application/json' \
+            -d '{
+              "script": {
+                "source": "int x = params.a; int y = params.b; return x + y;",
+                "params": { "a": 5, "b": 7 }
+              }
+            }' | tee painless_output.json
+
+      - name: Print output
+        run: |
+          echo "---- Painless script result ----"
+          cat painless_output.json | python3 -m json.tool || cat painless_output.json
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f es || true
