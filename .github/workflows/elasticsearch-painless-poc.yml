@@ -7,23 +7,11 @@ jobs:
   painless-poc:
     runs-on: ubuntu-latest
     steps:
-      - name: Cache Elasticsearch image
-        id: cache-es
-        uses: actions/cache@v4
-        with:
-          path: ~/es-image.tar
-          key: es-image-8.15.0
-
-      - name: Load or pull Elasticsearch image
+      - name: Pull Elasticsearch image
         run: |
           start=$(date +%s)
-          if [ -f ~/es-image.tar ]; then
-            docker load -i ~/es-image.tar
-          else
-            docker pull docker.elastic.co/elasticsearch/elasticsearch:8.15.0
-            docker save docker.elastic.co/elasticsearch/elasticsearch:8.15.0 -o ~/es-image.tar
-          fi
-          echo "Image ready in $(( $(date +%s) - start ))s"
+          docker pull docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+          echo "Pull took $(( $(date +%s) - start ))s"
 
       - name: Run Elasticsearch container
         run: |
