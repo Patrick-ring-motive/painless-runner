@@ -15,21 +15,6 @@ jobs:
           echo '{"max-concurrent-downloads": 10}' | sudo tee /etc/docker/daemon.json
           sudo systemctl restart docker
 
-      # NEW: Cache only the compressed Docker registry layers, not the heavy extracted daemon images
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        with:
-          path: /var/lib/docker/image/overlay2/distribution
-          key: ${{ runner.os }}-docker-${{ env.ES_IMAGE }}
-          restore-keys: |
-            ${{ runner.os }}-docker-
-
-      - name: Pull Elasticsearch image
-        run: |
-          start=$(date +%s)
-          docker pull "${{ env.ES_IMAGE }}"
-          echo "Pull took $(( $(date +%s) - start ))s"
-
       - name: Run Elasticsearch container
         run: |
           docker run -d --name es \
