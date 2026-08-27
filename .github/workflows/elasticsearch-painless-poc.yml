@@ -30,7 +30,7 @@ jobs:
             -e xpack.ml.enabled=false \
             -e xpack.watcher.enabled=false \
             -e xpack.monitoring.collection.enabled=false \
-            -e ES_JAVA_OPTS="-Xms256m -Xmx256m" \
+            -e ES_JAVA_OPTS="-Xms256m -Xmx256m -XX:-UseG1GC -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -XX:CICompilerCount=1 -Xlog:gc+init,startuptime" \
             "${{ env.ES_IMAGE }}"
 
       - name: Wait for Elasticsearch to be ready
@@ -44,6 +44,9 @@ jobs:
             sleep 1
           done
           curl -sf http://localhost:9200 || (echo "Elasticsearch failed to start"; docker logs es; exit 1)
+
+      - name: Show GC / startup timing
+        run: docker logs es 2>&1 | grep -E '\[(gc|startuptime)' || true
 
       - name: Execute Painless script
         run: |
