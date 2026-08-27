@@ -30,6 +30,8 @@ jobs:
             -e xpack.ml.enabled=false \
             -e xpack.watcher.enabled=false \
             -e xpack.monitoring.collection.enabled=false \
+            -e xpack.security.autoconfiguration.enabled=false \
+            -e xpack.security.enrollment.enabled=false \
             -e ES_JAVA_OPTS="-Xms256m -Xmx256m -XX:-UseG1GC -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -XX:CICompilerCount=1 -Xrs -XX:+UnlockExperimentalVMOptions -XX:+DisableAttachMechanism" \
             "${{ env.ES_IMAGE }}"
 
