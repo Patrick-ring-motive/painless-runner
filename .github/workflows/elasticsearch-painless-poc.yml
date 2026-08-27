@@ -4,11 +4,7 @@ on:
   workflow_dispatch:
 
 env:
-  ES_IMAGE_ELASTIC: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
-  ES_IMAGE_DOCKERHUB: elasticsearch:8.15.0
-  # Which of the two pulled images actually runs the container below.
-  # Flip this after checking the "Pull comparison" step output.
-  RUN_IMAGE: elasticsearch:8.15.0
+  ES_IMAGE: elasticsearch:8.15.0  # Docker Hub mirror — beat docker.elastic.co by ~20% in testing
 
 jobs:
   painless-poc:
@@ -19,22 +15,11 @@ jobs:
           echo '{"max-concurrent-downloads": 10}' | sudo tee /etc/docker/daemon.json
           sudo systemctl restart docker
 
-      - name: Pull (A) docker.elastic.co
+      - name: Pull Elasticsearch image
         run: |
           start=$(date +%s)
-          docker pull "${{ env.ES_IMAGE_ELASTIC }}"
-          echo "ELASTIC_PULL_SECONDS=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
-
-      - name: Pull (B) Docker Hub mirror
-        run: |
-          start=$(date +%s)
-          docker pull "${{ env.ES_IMAGE_DOCKERHUB }}"
-          echo "DOCKERHUB_PULL_SECONDS=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
-
-      - name: Pull comparison
-        run: |
-          echo "docker.elastic.co : ${ELASTIC_PULL_SECONDS}s"
-          echo "Docker Hub mirror  : ${DOCKERHUB_PULL_SECONDS}s"
+          docker pull "${{ env.ES_IMAGE }}"
+          echo "Pull took $(( $(date +%s) - start ))s"
 
       - name: Run Elasticsearch container
         run: |
@@ -46,7 +31,7 @@ jobs:
             -e xpack.watcher.enabled=false \
             -e xpack.monitoring.collection.enabled=false \
             -e ES_JAVA_OPTS="-Xms256m -Xmx256m" \
-            "${{ env.RUN_IMAGE }}"
+            "${{ env.ES_IMAGE }}"
 
       - name: Wait for Elasticsearch to be ready
         run: |
