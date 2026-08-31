@@ -105,6 +105,8 @@ jobs:
             }
           }).listen(9200, "127.0.0.1", () => console.log("Request logger listening on port 9200"));
           EOF
+
+          date +%s000 > /tmp/last-tunnel-request
           node /tmp/request-logger.mjs &
 
           while true; do
