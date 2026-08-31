@@ -74,42 +74,61 @@ jobs:
           cat > /tmp/request-logger.mjs <<'EOF'
           import http from "node:http";
           import fs from "node:fs";
-          import { Readable } from "node:stream";
 
           const activityFile = "/tmp/last-tunnel-request";
           fs.writeFileSync(activityFile, String(Date.now()));
 
+          function safeHeaders(headers) {
+            return Object.fromEntries(Object.entries(headers).map(([name, value]) => [
+              name,
+              /authorization|cf-access-client-secret/i.test(name) ? "[redacted]" : value,
+            ]));
+          }
+
           http.createServer(async (request, response) => {
+            const started = performance.now();
             try {
               fs.writeFileSync(activityFile, String(Date.now()));
-              console.log(`[request] ${new Date().toISOString()} ${request.method} ${request.url}`);
 
               const hasBody = request.method !== "GET" && request.method !== "HEAD";
               const chunks = [];
               if (hasBody) {
                 for await (const chunk of request) chunks.push(chunk);
               }
+              const requestBody = Buffer.concat(chunks);
+              console.log(`[request] ${new Date().toISOString()} ${request.method} ${request.url}`);
+              console.log(`[request headers] ${JSON.stringify(safeHeaders(request.headers))}`);
+              console.log(`[request body] ${requestBody.toString("utf8")}`);
 
               const headers = new Headers(request.headers);
-              for (const name of ["connection", "content-length", "host", "transfer-encoding"]) {
+              for (const name of ["accept-encoding", "connection", "content-length", "host", "transfer-encoding"]) {
                 headers.delete(name);
               }
 
               const upstream = await fetch(`http://127.0.0.1:9201${request.url}`, {
                 method: request.method,
                 headers,
-                body: hasBody ? Buffer.concat(chunks) : undefined,
+                body: hasBody ? requestBody : undefined,
               });
+              const responseBody = Buffer.from(await upstream.arrayBuffer());
 
-              response.writeHead(upstream.status, Object.fromEntries(upstream.headers));
-              if (upstream.body) {
-                Readable.fromWeb(upstream.body).pipe(response);
-              } else {
-                response.end();
+              const responseHeaders = new Headers(upstream.headers);
+              for (const name of ["connection", "content-encoding", "content-length", "transfer-encoding"]) {
+                responseHeaders.delete(name);
               }
+              responseHeaders.set("content-length", String(responseBody.length));
+
+              console.log(`[upstream response] ${upstream.status} ${upstream.statusText} ${Math.round(performance.now() - started)}ms`);
+              console.log(`[upstream headers] ${JSON.stringify(Object.fromEntries(responseHeaders))}`);
+              console.log(`[upstream body] ${responseBody.toString("utf8")}`);
+
+              response.writeHead(upstream.status, Object.fromEntries(responseHeaders));
+              response.end(responseBody, () => {
+                console.log(`[response complete] ${request.method} ${request.url} ${Math.round(performance.now() - started)}ms`);
+              });
             } catch (error) {
               console.error(`[proxy error] ${error.stack ?? error}`);
-              if (!response.headersSent) response.writeHead(502);
+              if (!response.headersSent) response.writeHead(502, { "content-type": "text/plain" });
               response.end("Elasticsearch is unavailable");
             }
           }).listen(9200, "127.0.0.1", () => console.log("Request logger listening on port 9200"));
