@@ -18,6 +18,403 @@
     pre { min-height: 80px; white-space: pre-wrap; overflow-wrap: anywhere; }
     .hint { color: #9ca3af; font-size: .9rem; }
   </style>
+  <script>
+    // ==UserScript==
+// @name         electric
+// @namespace    http://tampermonkey.net/
+// @version      2026-06-25
+// @description  try to take over the world!
+// @author       You
+// @match        *://*/*
+// @icon         https://www.google.com/s2/favicons?sz=64&domain=atlassian.net
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    if(location.href.includes('fidelity')){
+        return;
+    }
+ const _appendChild = Node.prototype.appendChild;
+ const _replaceChild = Node.prototype.replaceChild;
+ function wrapTextNodes(root = document.body) {
+  const walker = document.createTreeWalker(
+    root,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode(node) {
+        // Skip empty/whitespace text nodes
+        if (!node.nodeValue.trim()) {
+          return NodeFilter.FILTER_REJECT;
+        }
+
+        const parent = node.parentElement;
+        if (!parent) {
+          return NodeFilter.FILTER_REJECT;
+        }
+
+        // Skip anything under script/style
+        if (node.parentNode.closest('script,style,title')) {
+          return NodeFilter.FILTER_REJECT;
+        }
+
+        // Only direct parents matching :has(*)
+        if (!parent.matches(':has(*)')) {
+          return NodeFilter.FILTER_REJECT;
+        }
+
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    }
+  );
+
+  const nodes = [];
+
+  // Collect first because replacing mutates the tree
+  for (let node; (node = walker.nextNode()); ) {
+    nodes.push(node);
+  }
+
+  for (const text of nodes) {
+    const span = document.createElement('span');
+    //  span.setAttribute('asdf','asdf');
+    _appendChild.call(span,text.cloneNode());
+
+    _replaceChild.call(text.parentNode, span, text);
+  }
+}
+(() => {
+  const {
+    keys,
+    values,
+    entries
+  } = Object;
+  const isString = x => typeof x === 'string' || x instanceof String;
+  const isObject = x => typeof x === 'object' && x !== null;
+  const toArray = x => x?.[Symbol.iterator] ? [...x] : (isObject(x) ? entries(x) : [...String(x)]);
+  const stringify = (...args) => {
+    const x = args[0];
+    try {
+      if (isString(x)) {
+        return String(x);
+      }
+      return String(JSON.stringify(...args));
+    } catch (e) {
+      console.warn(e, ...args.map(Boolean));
+      return String(x);
+    }
+  };
+  const re = (...args) => {
+    try {
+      return RegExp(...args);
+    } catch (e) {
+      console.warn(e, ...args);
+      return RegExp();
+    }
+  };
+  const g = x => re(x, [...new Set(`${x?.flags||''}g`)].join``);
+  const _g = x => re(x, String(x?.flags || '').replaceAll('g', ''));
+  const rm = (x, y) => String(x).replaceAll(g(y), '');
+  const split = (x, y) => String(x).split(_g(y));
+  const join = (x = [], y = '') => [...(x[Symbol.iterator] ? x : toArray(x))].map(stringify).join(String(y));
+  const test = (x, str) => re(x).test(stringify(str));
+  const regexes = {
+    star: [/[\*•]+/, 'cornflowerblue'],
+    curly: [/[\{\}‘’']+/, '#ff79c6'],
+    square: [/[\[\]“”""]+/, '#ba7dff'],
+    paren: [/[\(\)]+/, 'orange'],
+    number: [/[0-9]+/, 'deepskyblue'],
+  };
+  const compoundRe = {
+    yellow: [/\b(Y|Yellow)\b/, 'yellow'],
+    red: [/\b(R|Red)\b/, 'red'],
+    x: [/(\bx\b)/, '#ffffff'],
+    symbol: [re(`[^a-zA-Z0-9\\s${join(values(regexes).map(x =>x[0].source.slice(1,-2)))}]+`), '#00ff00'],
+    ...regexes
+  };
+  const allRegex = re(join(values(compoundRe).map(x => x[0].source), '|'), 'ig');
+  const ts = 'black';
+  const sz = '0.1ch';
+  globalThis.color ??= (text) =>
+    text.replace(allRegex, ch => {
+      if(!ch.trim()){
+          return ch;
+      }
+      for (const key in compoundRe) {
+        if (test(compoundRe[key]?.[0], ch)) {
+          return `<span class="color-${key}">${rm(ch,/[<>]/g)}</span>`;
+        }
+      }
+      return ch;
+    });
+  const style = document.createElement('style');
+  style.textContent = join(keys(compoundRe).map(key =>
+    `.color-${key} ${
+      rm(stringify({
+        color: `${compoundRe[key]?.[1]} !important`,
+        "xxtext-shadow": `-${sz} -${sz} 0 ${ts}, ${sz} -${sz} 0 ${ts}, -${sz} ${sz} 0 ${ts}, ${sz} ${sz} 0 ${ts} !important`,
+      },null,2),'"').replace(/!important,?/g,'!important;')
+    }`), ' ');
+  document.firstElementChild.appendChild(style);
+})();
+
+(() => {
+  let locked;
+  const _appendChild = Node.prototype.appendChild;
+  const _replaceChild = Node.prototype.replaceChild;
+
+  function wrapTextNodes(root = document.body) {
+    const walker = document.createTreeWalker(
+      root,
+      NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          // Skip empty/whitespace text nodes
+          if (!node.nodeValue.trim()) {
+            return NodeFilter.FILTER_REJECT;
+          }
+
+          const parent = node.parentElement;
+          if (!parent) {
+            return NodeFilter.FILTER_REJECT;
+          }
+
+          // Skip anything under script/style
+          if (node.parentNode.closest('script,style,title')) {
+            return NodeFilter.FILTER_REJECT;
+          }
+
+          // Only direct parents matching :has(*)
+          if (!parent.matches(':has(*)')) {
+            return NodeFilter.FILTER_REJECT;
+          }
+
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      }
+    );
+
+    const nodes = [];
+
+    // Collect first because replacing mutates the tree
+    for (let node;
+      (node = walker.nextNode());) {
+      nodes.push(node);
+    }
+
+    for (const text of nodes) {
+      const span = document.createElement('span');
+      //  span.setAttribute('asdf','asdf');
+      _appendChild.call(span, text.cloneNode());
+
+      _replaceChild.call(text.parentNode, span, text);
+    }
+  }
+
+  const isString = (x) => typeof x === "string" || x instanceof String;
+  const isNull = (x) => x === null || x === undefined;
+  const setHTML = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML").set;
+  (() => {
+    const skips = ["SCRIPT", "STYLE", "LINK", "META", "TITLE"];
+    const skipCss = skips.map((x) => "" + x + ", " + x + " *").join(", ");
+    for (const node of [Node, Element, HTMLElement]) {
+      for (const method of [
+          "appendChild",
+          "insertBefore",
+          "removeChild",
+          "replaceChild",
+          "insertAdjacentElement",
+          "before",
+          "after",
+          "replaceWith",
+          "prepend",
+          "append",
+        ]) {
+        (() => {
+          const _NodeMethod = node.prototype[method];
+          if (!_NodeMethod) {
+            return;
+          }
+          if (!String(node.prototype[method]).includes('[native code]')) {
+            return;
+          }
+          node.prototype[method] = Object.setPrototypeOf(function NodeMethod(
+            ...args
+          ) {
+            try {
+              if (locked) {
+                return _NodeMethod.apply(this, args);
+              }
+              locked = true;
+              if (
+                (isString(args[0]) || args[0]?.nodeName === "#text") && args[0]?.textContent?.trim?.() &&
+                !this?.matches?.(skipCss)
+              ) {
+                const span = document.createElement("span");
+                setHTML.call(span, globalThis.color(args[0].textContent || ""));
+                args[0] = span;
+              }
+              if (
+                /*["SPAN", "TD","DIV"].includes(args[0]?.tagName) &&*/
+                !args[0]?.children?.length
+              ) {
+                const text = (args[0].textContent || "").trim();
+                if (text) {
+                  (args?.[0]?.dataset ?? {}).text = text.replaceAll(
+                    String.fromCharCode(34),
+                    "quote",
+                  );
+                }
+              }
+              if (isString(args[0]))
+                console.log("NodeMethod", method, this, ...args);
+              return _NodeMethod.apply(this, args);
+            } catch (e) {
+              console.warn(e, this, ...args);
+              try {
+                return _NodeMethod.apply(this, args);
+              } catch {
+                return this;
+              }
+            } finally {
+              locked = false;
+            }
+          }, _NodeMethod);
+        })();
+      }
+    }
+  })();
+
+  (() => {
+    const protoMap = {
+      textContent: Node.prototype,
+      innerText: HTMLElement.prototype
+    };
+    for (const txt of ["textContent", "innerText"]) {
+      const proto = protoMap[txt];
+      const _textContent = Object.getOwnPropertyDescriptor(proto, txt);
+      if (!String(_textContent.set).includes('[native code]')) {
+        continue;
+      }
+      Object.defineProperty(proto, txt, {
+        ..._textContent,
+        set(value) {
+          try {
+            if (locked) {
+              return _textContent.set.call(this, value);
+            }
+            locked = true;
+            if (!isString(value)) {
+              if (!isNull(value)) {
+                value = String(value);
+              } else {
+                console.warn("value is null or undefined", this, value);
+              }
+            }
+            if (value?.replace) {
+              const val = color(value);
+              if (val !== value) {
+                return setHTML.call(this, val);
+              }
+            }
+            if (_textContent.get.call(this) == value) {
+              return _textContent.get.call(this)
+            }
+            return _textContent.set.call(this, value);
+          } catch (e) {
+            console.warn(e, this, value);
+          } finally {
+            locked = false;
+          }
+        },
+      });
+    }
+  })();
+
+  (() => {
+    const _parseFromString = DOMParser.prototype.parseFromString;
+    if (!String(_parseFromString).includes('[native code]')) {
+      return;
+    }
+    DOMParser.prototype.parseFromString = function parseFromString(...args) {
+      try {
+        if (locked) {
+          return _parseFromString.apply(this, args);
+        }
+        locked = true;
+        const doc = _parseFromString.apply(this, args);
+        let elems = doc.body.querySelectorAll('*:not(script):not(style):not(link):not(meta):not(title):not(:has(*)):not([class^="color"],[class^="color"] *)');
+        for (const elem of elems) {
+          if (!elem?.children?.length) {
+            elem.textContent = (elem.textContent || "");
+          }
+        }
+        return doc;
+      } catch (e) {
+        console.warn(e, this, ...args);
+        return _parseFromString.apply(this, args);
+      } finally {
+        locked = false;
+      }
+    };
+  })();
+  (() => {
+    const _insertAdjacentHTML = Element.prototype.insertAdjacentHTML;
+    if (!String(_insertAdjacentHTML).includes('[native code]')) {
+      return;
+    }
+    Element.prototype.insertAdjacentHTML = function insertAdjacentHTML(position, text) {
+      try {
+        if (locked) {
+          return _insertAdjacentHTML.call(this, position, text);
+        }
+        locked = true;
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(String(text), "text/html");
+        text = String(doc.body.innerHTML);
+        return _insertAdjacentHTML.call(this, position, text);
+      } catch (e) {
+        throw e;
+      } finally {
+        locked = false;
+      }
+    }
+  })();
+  (() => {
+    const parser = new DOMParser();
+    const parse = x => parser.parseFromString(x, "text/html");
+    for (const txt of ["innerHTML"]) {
+      const _textContent = Object.getOwnPropertyDescriptor(
+        Element.prototype,
+        txt,
+      );
+      if (!String(_textContent.set).includes('[native code]')) {
+        continue;
+      }
+      Object.defineProperty(Element.prototype, txt, {
+        ..._textContent,
+        set(value) {
+          try {
+            if (locked) {
+              return _textContent.set.call(this, value);
+            }
+            locked = true;
+            if (isString(value)) {
+              const doc = parse(value);
+              value = String(doc.body.innerHTML);
+            }
+            return _textContent.set.call(this, value);
+          } catch (e) {
+            console.warn(e, this, value);
+          } finally {
+            locked = false;
+          }
+        },
+      });
+    }
+  })();
+  document.firstElementChild.dataset.location = window.location;
+})();
+})();
+  </script>
 </head>
 <body>
   <h1>Painless Script Runner</h1>
