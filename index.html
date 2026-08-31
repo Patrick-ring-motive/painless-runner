@@ -17,6 +17,20 @@
     button:disabled { opacity: .6; cursor: wait; }
     pre { min-height: 80px; white-space: pre-wrap; overflow-wrap: anywhere; }
     .hint { color: #9ca3af; font-size: .9rem; }
+    .editor { display: grid; }
+    .editor > textarea, .editor > pre { grid-area: 1 / 1; margin: 0; font: 14px/1.5 ui-monospace, monospace; tab-size: 2; white-space: pre-wrap; overflow-wrap: break-word; }
+    .editor > pre { z-index: 0; pointer-events: none; overflow: hidden; color: #e5e7eb; }
+    .editor > textarea { z-index: 1; background: transparent; color: transparent; caret-color: #fff; -webkit-text-fill-color: transparent; }
+    .editor > textarea::selection { background: #264f78; -webkit-text-fill-color: transparent; }
+    .token-star { color: cornflowerblue; }
+    .token-curly { color: #ff79c6; }
+    .token-square { color: #ba7dff; }
+    .token-paren { color: orange; }
+    .token-number { color: deepskyblue; }
+    .token-symbol { color: #00ff00; }
+    .token-yellow { color: yellow; }
+    .token-red { color: red; }
+    .token-x { color: #fff; }
   </style>
   <script>
     // ==UserScript==
@@ -424,15 +438,21 @@
   <input id="endpoint" type="url" value="https://painless-runner.smokestack.workers.dev/execute">
 
   <label for="source">Script</label>
-  <textarea id="source" spellcheck="false">int x = params.a;
+  <div class="editor">
+    <pre id="source-highlight" aria-hidden="true"></pre>
+    <textarea id="source" spellcheck="false">int x = params.a;
 int y = params.b;
 return x + y;</textarea>
+  </div>
 
   <label for="params">Parameters (JSON)</label>
-  <textarea id="params" spellcheck="false">{
+  <div class="editor">
+    <pre id="params-highlight" aria-hidden="true"></pre>
+    <textarea id="params" spellcheck="false">{
   "a": 5,
   "b": 7
 }</textarea>
+  </div>
 
   <button id="run" type="button">Run script</button>
 
@@ -443,8 +463,38 @@ return x + y;</textarea>
     const endpoint = document.querySelector("#endpoint");
     const source = document.querySelector("#source");
     const params = document.querySelector("#params");
+    const sourceHighlight = document.querySelector("#source-highlight");
+    const paramsHighlight = document.querySelector("#params-highlight");
     const run = document.querySelector("#run");
     const output = document.querySelector("#output");
+
+    const highlightPattern = /(\b(?:Y|Yellow)\b)|(\b(?:R|Red)\b)|(\bx\b)|([*•]+)|([{}‘’']+)|([\[\]“”"]+)|([()]+)|(\d+)|([^a-zA-Z0-9\s*•{}‘’'\[\]“”"()]+)/gi;
+    const highlightClasses = ["yellow", "red", "x", "star", "curly", "square", "paren", "number", "symbol"];
+    const escapeHtml = (value) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+
+    function highlightedHtml(value) {
+      let html = "";
+      let offset = 0;
+      for (const match of value.matchAll(highlightPattern)) {
+        html += escapeHtml(value.slice(offset, match.index));
+        const groupIndex = match.slice(1).findIndex(Boolean);
+        html += `<span class="token-${highlightClasses[groupIndex]}">${escapeHtml(match[0])}</span>`;
+        offset = match.index + match[0].length;
+      }
+      return html + escapeHtml(value.slice(offset)) + "\n";
+    }
+
+    function syncHighlight(textarea, highlight) {
+      highlight.innerHTML = highlightedHtml(textarea.value);
+      highlight.scrollTop = textarea.scrollTop;
+      highlight.scrollLeft = textarea.scrollLeft;
+    }
+
+    for (const [textarea, highlight] of [[source, sourceHighlight], [params, paramsHighlight]]) {
+      textarea.addEventListener("input", () => syncHighlight(textarea, highlight));
+      textarea.addEventListener("scroll", () => syncHighlight(textarea, highlight));
+      syncHighlight(textarea, highlight);
+    }
 
     endpoint.value = localStorage.getItem("painless-endpoint") || endpoint.value;
 
@@ -453,6 +503,7 @@ return x + y;</textarea>
       event.preventDefault();
       const start = source.selectionStart;
       source.setRangeText("  ", start, source.selectionEnd, "end");
+      syncHighlight(source, sourceHighlight);
     });
 
     run.addEventListener("click", async () => {
