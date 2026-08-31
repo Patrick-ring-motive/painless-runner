@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Painless Script Runner</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    body { max-width: 900px; margin: 2rem auto; padding: 0 1rem; background: #111827; color: #e5e7eb; }
+    h1 { margin-bottom: .25rem; }
+    label { display: block; margin: 1rem 0 .4rem; font-weight: 600; }
+    input, textarea, pre, button { box-sizing: border-box; width: 100%; border-radius: 6px; }
+    input, textarea, pre { border: 1px solid #374151; background: #030712; color: #e5e7eb; padding: .75rem; }
+    textarea { min-height: 220px; resize: vertical; font: 14px/1.5 ui-monospace, monospace; tab-size: 2; }
+    #params { min-height: 100px; }
+    button { margin-top: 1rem; padding: .8rem; border: 0; background: #2563eb; color: white; font-weight: 700; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: wait; }
+    pre { min-height: 80px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .hint { color: #9ca3af; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <h1>Painless Script Runner</h1>
+  <div class="hint">Runs scripts through Elasticsearch's Painless execute API.</div>
+
+  <label for="endpoint">Worker endpoint</label>
+  <input id="endpoint" type="url" value="https://painless-runner.smokestack.workers.dev/execute">
+
+  <label for="source">Script</label>
+  <textarea id="source" spellcheck="false">int x = params.a;
+int y = params.b;
+return x + y;</textarea>
+
+  <label for="params">Parameters (JSON)</label>
+  <textarea id="params" spellcheck="false">{
+  "a": 5,
+  "b": 7
+}</textarea>
+
+  <button id="run" type="button">Run script</button>
+
+  <label for="output">Response</label>
+  <pre id="output">Ready.</pre>
+
+  <script>
+    const endpoint = document.querySelector("#endpoint");
+    const source = document.querySelector("#source");
+    const params = document.querySelector("#params");
+    const run = document.querySelector("#run");
+    const output = document.querySelector("#output");
+
+    endpoint.value = localStorage.getItem("painless-endpoint") || endpoint.value;
+
+    source.addEventListener("keydown", (event) => {
+      if (event.key !== "Tab") return;
+      event.preventDefault();
+      const start = source.selectionStart;
+      source.setRangeText("  ", start, source.selectionEnd, "end");
+    });
+
+    run.addEventListener("click", async () => {
+      run.disabled = true;
+      output.textContent = "Running…";
+
+      try {
+        const scriptParams = JSON.parse(params.value);
+        localStorage.setItem("painless-endpoint", endpoint.value);
+
+        const response = await fetch(endpoint.value, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            script: {
+              source: source.value,
+              params: scriptParams,
+            },
+          }),
+        });
+
+        const text = await response.text();
+        let body;
+        try { body = JSON.stringify(JSON.parse(text), null, 2); }
+        catch { body = text; }
+
+        output.textContent = `HTTP ${response.status} ${response.statusText}\n\n${body}`;
+      } catch (error) {
+        output.textContent = `Error: ${error.message}`;
+      } finally {
+        run.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
