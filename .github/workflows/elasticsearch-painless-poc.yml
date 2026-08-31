@@ -38,9 +38,11 @@ jobs:
 
       - name: Wait for Elasticsearch to be ready
         run: |
-          start=$(date +%s)
-          until curl -sf http://localhost:9201 >/dev/null; do
-            sleep 0.05
+          for _ in $(seq 1 300); do
+            if curl -sf http://localhost:9201 >/dev/null; then
+              break
+            fi
+            sleep 1
           done
           curl -sf http://localhost:9201 || (echo "Elasticsearch failed to start"; docker logs es; exit 1)
 
@@ -50,9 +52,15 @@ jobs:
       - name: Run tunnel until idle
         env:
           CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+          CALLBACK_TOKEN: ${{ secrets.CALLBACK_TOKEN }}
+          WORKER_CALLBACK_URL: ${{ vars.WORKER_CALLBACK_URL }}
         run: |
           if [ -z "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
             echo "CLOUDFLARE_TUNNEL_TOKEN secret must be set"
+            exit 1
+          fi
+          if [ -z "$CALLBACK_TOKEN" ] || [ -z "$WORKER_CALLBACK_URL" ]; then
+            echo "CALLBACK_TOKEN secret and WORKER_CALLBACK_URL variable must be set"
             exit 1
           fi
 
@@ -63,13 +71,17 @@ jobs:
             tunnel --metrics 127.0.0.1:20241 --no-autoupdate run \
             --token "$CLOUDFLARE_TUNNEL_TOKEN"
 
-          until curl -sf http://127.0.0.1:20241/metrics >/dev/null; do
+          for _ in $(seq 1 300); do
+            if curl -sf http://127.0.0.1:20241/metrics >/dev/null; then
+              break
+            fi
             if ! docker inspect -f '{{.State.Running}}' cf-tunnel | grep -q true; then
               docker logs cf-tunnel
               exit 1
             fi
             sleep 1
           done
+          curl -sf http://127.0.0.1:20241/metrics >/dev/null || (echo "Tunnel failed to start"; docker logs cf-tunnel; exit 1)
 
           cat > /tmp/request-logger.mjs <<'EOF'
           import http from "node:http";
@@ -77,6 +89,33 @@ jobs:
 
           const activityFile = "/tmp/last-tunnel-request";
           fs.writeFileSync(activityFile, String(Date.now()));
+
+          const ansi = {
+            reset: "\x1b[0m",
+            star: "\x1b[94m",
+            curly: "\x1b[95m",
+            square: "\x1b[35m",
+            paren: "\x1b[33m",
+            number: "\x1b[96m",
+            symbol: "\x1b[92m",
+            yellow: "\x1b[93m",
+            red: "\x1b[91m",
+            x: "\x1b[97m",
+          };
+          const syntaxPattern = /(\b(?:Y|Yellow)\b)|(\b(?:R|Red)\b)|(\bx\b)|([*•]+)|([{}‘’']+)|([\[\]“”"]+)|([()]+)|(\d+)|([^a-zA-Z0-9\s*•{}‘’'\[\]“”"()]+)/gi;
+          const syntaxColors = ["yellow", "red", "x", "star", "curly", "square", "paren", "number", "symbol"];
+
+          function syntaxHighlight(value) {
+            return String(value).replace(syntaxPattern, (...match) => {
+              const groups = match.slice(1, 10);
+              const index = groups.findIndex(Boolean);
+              return index < 0 ? match[0] : `${ansi[syntaxColors[index]]}${match[0]}${ansi.reset}`;
+            });
+          }
+
+          function log(color, label, value = "") {
+            console.log(`${ansi[color]}[${label}]${ansi.reset}${value ? ` ${syntaxHighlight(value)}` : ""}`);
+          }
 
           function safeHeaders(headers) {
             return Object.fromEntries(Object.entries(headers).map(([name, value]) => [
@@ -96,9 +135,9 @@ jobs:
                 for await (const chunk of request) chunks.push(chunk);
               }
               const requestBody = Buffer.concat(chunks);
-              console.log(`[request] ${new Date().toISOString()} ${request.method} ${request.url}`);
-              console.log(`[request headers] ${JSON.stringify(safeHeaders(request.headers))}`);
-              console.log(`[request body] ${requestBody.toString("utf8")}`);
+              log("star", "request", `${new Date().toISOString()} ${request.method} ${request.url}`);
+              log("square", "request headers", JSON.stringify(safeHeaders(request.headers)));
+              log("curly", "request body", requestBody.toString("utf8"));
 
               const headers = new Headers(request.headers);
               for (const name of ["accept-encoding", "connection", "content-length", "host", "transfer-encoding"]) {
@@ -118,20 +157,39 @@ jobs:
               }
               responseHeaders.set("content-length", String(responseBody.length));
 
-              console.log(`[upstream response] ${upstream.status} ${upstream.statusText} ${Math.round(performance.now() - started)}ms`);
-              console.log(`[upstream headers] ${JSON.stringify(Object.fromEntries(responseHeaders))}`);
-              console.log(`[upstream body] ${responseBody.toString("utf8")}`);
+              log("paren", "upstream response", `${upstream.status} ${upstream.statusText} ${Math.round(performance.now() - started)}ms`);
+              log("square", "upstream headers", JSON.stringify(Object.fromEntries(responseHeaders)));
+              log("curly", "upstream body", responseBody.toString("utf8"));
 
               response.writeHead(upstream.status, Object.fromEntries(responseHeaders));
               response.end(responseBody, () => {
-                console.log(`[response complete] ${request.method} ${request.url} ${Math.round(performance.now() - started)}ms`);
+                log("symbol", "response complete", `${request.method} ${request.url} ${Math.round(performance.now() - started)}ms`);
               });
             } catch (error) {
-              console.error(`[proxy error] ${error.stack ?? error}`);
+              console.error(`${ansi.red}[proxy error]${ansi.reset} ${syntaxHighlight(error.stack ?? error)}`);
               if (!response.headersSent) response.writeHead(502, { "content-type": "text/plain" });
               response.end("Elasticsearch is unavailable");
             }
-          }).listen(9200, "127.0.0.1", () => console.log("Request logger listening on port 9200"));
+          }).listen(9200, "127.0.0.1", async () => {
+            log("star", "logger", "Request logger listening on port 9200");
+            const callbackUrl = `${process.env.WORKER_CALLBACK_URL.replace(/\/$/, "")}/_internal/tunnel-ready`;
+            while (true) {
+              try {
+                const callback = await fetch(callbackUrl, {
+                  method: "POST",
+                  headers: { Authorization: `Bearer ${process.env.CALLBACK_TOKEN}` },
+                });
+                if (callback.ok) {
+                  log("symbol", "ready", "Worker readiness callback accepted");
+                  break;
+                }
+                console.error(`${ansi.red}[callback error]${ansi.reset} ${syntaxHighlight(callback.status)}`);
+              } catch (error) {
+                console.error(`${ansi.red}[callback error]${ansi.reset} ${syntaxHighlight(error.stack ?? error)}`);
+              }
+              await new Promise((resolve) => setTimeout(resolve, 1000));
+            }
+          });
           EOF
 
           date +%s000 > /tmp/last-tunnel-request
