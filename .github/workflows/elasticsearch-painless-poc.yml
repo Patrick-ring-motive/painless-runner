@@ -85,11 +85,20 @@ jobs:
               console.log(`[request] ${new Date().toISOString()} ${request.method} ${request.url}`);
 
               const hasBody = request.method !== "GET" && request.method !== "HEAD";
+              const chunks = [];
+              if (hasBody) {
+                for await (const chunk of request) chunks.push(chunk);
+              }
+
+              const headers = new Headers(request.headers);
+              for (const name of ["connection", "content-length", "host", "transfer-encoding"]) {
+                headers.delete(name);
+              }
+
               const upstream = await fetch(`http://127.0.0.1:9201${request.url}`, {
                 method: request.method,
-                headers: request.headers,
-                body: hasBody ? request : undefined,
-                duplex: hasBody ? "half" : undefined,
+                headers,
+                body: hasBody ? Buffer.concat(chunks) : undefined,
               });
 
               response.writeHead(upstream.status, Object.fromEntries(upstream.headers));
@@ -99,7 +108,7 @@ jobs:
                 response.end();
               }
             } catch (error) {
-              console.error(`[proxy error] ${error.message}`);
+              console.error(`[proxy error] ${error.stack ?? error}`);
               if (!response.headersSent) response.writeHead(502);
               response.end("Elasticsearch is unavailable");
             }
