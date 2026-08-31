@@ -1,0 +1,35 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "painless-runner",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-31",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "ORIGIN_URL": "https://painless.smokestacks.org",
+    "GITHUB_OWNER": "Patrick-ring-motive",
+    "GITHUB_REPO": "painless-runner",
+    "GITHUB_WORKFLOW": "elasticsearch-painless-poc.yml",
+    "GITHUB_REF": "main",
+    "WORKER_CALLBACK_URL": "https://painless-runner.smokestack.workers.dev"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "TUNNEL_COORDINATOR",
+        "class_name": "TunnelCoordinator"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["TunnelCoordinator"]
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "head_sampling_rate": 1
+    }
+  }
+}
