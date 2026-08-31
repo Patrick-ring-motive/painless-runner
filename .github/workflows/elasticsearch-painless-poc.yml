@@ -2,6 +2,16 @@ name: Elasticsearch Painless POC
 
 on:
   workflow_dispatch:
+    inputs:
+      callback_token:
+        required: true
+        type: string
+      tunnel_token:
+        required: true
+        type: string
+      worker_callback_url:
+        required: true
+        type: string
 
 env:
   ES_IMAGE: elasticsearch:8.15.0  # Docker Hub mirror — beat docker.elastic.co by ~20% in testing
@@ -51,9 +61,9 @@ jobs:
 
       - name: Run tunnel until idle
         env:
-          CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
-          CALLBACK_TOKEN: ${{ secrets.CALLBACK_TOKEN }}
-          WORKER_CALLBACK_URL: ${{ vars.WORKER_CALLBACK_URL }}
+          CLOUDFLARE_TUNNEL_TOKEN: ${{ inputs.tunnel_token }}
+          CALLBACK_TOKEN: ${{ inputs.callback_token }}
+          WORKER_CALLBACK_URL: ${{ inputs.worker_callback_url }}
         run: |
           if [ -z "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
             echo "CLOUDFLARE_TUNNEL_TOKEN secret must be set"
