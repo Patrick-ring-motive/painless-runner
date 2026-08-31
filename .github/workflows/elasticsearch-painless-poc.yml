@@ -9,7 +9,11 @@ env:
 jobs:
   painless-poc:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
       - name: Increase Docker pull concurrency
         run: |
           echo '{"max-concurrent-downloads": 10}' | sudo tee /etc/docker/daemon.json
@@ -43,22 +47,49 @@ jobs:
       - name: Show GC / startup timing
         run: docker logs es 2>&1 | grep -E '\[(gc|startuptime)' || true
 
-      - name: Execute Painless script
+      - name: Run tunnel until idle
+        env:
+          CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
         run: |
-          curl -s -X POST "http://localhost:9200/_scripts/painless/_execute" \
-            -H 'Content-Type: application/json' \
-            -d '{
-              "script": {
-                "source": "int x = params.a; int y = params.b; return x + y;",
-                "params": { "a": 5, "b": 7 }
-              }
-            }' | tee painless_output.json
+          if [ -z "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
+            echo "CLOUDFLARE_TUNNEL_TOKEN secret must be set"
+            exit 1
+          fi
 
-      - name: Print output
-        run: |
-          echo "---- Painless script result ----"
-          cat painless_output.json | python3 -m json.tool || cat painless_output.json
+          docker run -d --name cf-tunnel --network host \
+            cloudflare/cloudflared:latest \
+            tunnel --metrics 127.0.0.1:20241 --no-autoupdate run \
+            --token "$CLOUDFLARE_TUNNEL_TOKEN"
 
-      - name: Stop container
+          until curl -sf http://127.0.0.1:20241/metrics >/dev/null; do
+            if ! docker inspect -f '{{.State.Running}}' cf-tunnel | grep -q true; then
+              docker logs cf-tunnel
+              exit 1
+            fi
+            sleep 1
+          done
+
+          request_count=0
+          last_activity=$(date +%s)
+          while true; do
+            current_count=$(curl -sf http://127.0.0.1:20241/metrics | \
+              awk '$1 == "cloudflared_tunnel_total_requests" { total += $2 } END { print total + 0 }')
+            if [ "$current_count" != "$request_count" ]; then
+              request_count="$current_count"
+              last_activity=$(date +%s)
+            fi
+            now=$(date +%s)
+            if [ $((now - last_activity)) -ge 900 ]; then
+              echo "No tunnel requests for 15 minutes; stopping"
+              break
+            fi
+            sleep 10
+          done
+
+      - name: Show tunnel logs
         if: always()
-        run: docker rm -f es || true
+        run: docker logs cf-tunnel 2>&1 || true
+
+      - name: Stop containers
+        if: always()
+        run: docker rm -f cf-tunnel es || true
