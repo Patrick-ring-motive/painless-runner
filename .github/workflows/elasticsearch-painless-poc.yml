@@ -22,7 +22,7 @@ jobs:
       - name: Run Elasticsearch container
         run: |
           docker run -d --name es \
-            -p 9200:9200 \
+            -p 9201:9200 \
             -e discovery.type=single-node \
             -e ingest.geoip.downloader.enabled=false \
             -e bootstrap.memory_lock=true \
@@ -39,10 +39,10 @@ jobs:
       - name: Wait for Elasticsearch to be ready
         run: |
           start=$(date +%s)
-          until curl -sf http://localhost:9200 >/dev/null; do
+          until curl -sf http://localhost:9201 >/dev/null; do
             sleep 0.05
           done
-          curl -sf http://localhost:9200 || (echo "Elasticsearch failed to start"; docker logs es; exit 1)
+          curl -sf http://localhost:9201 || (echo "Elasticsearch failed to start"; docker logs es; exit 1)
 
       - name: Show GC / startup timing
         run: docker logs es 2>&1 | grep -E '\[(gc|startuptime)' || true
@@ -55,6 +55,8 @@ jobs:
             echo "CLOUDFLARE_TUNNEL_TOKEN secret must be set"
             exit 1
           fi
+
+          node --version
 
           docker run -d --name cf-tunnel --network host \
             cloudflare/cloudflared:latest \
@@ -69,20 +71,52 @@ jobs:
             sleep 1
           done
 
-          request_count=0
-          last_activity=$(date +%s)
+          cat > /tmp/request-logger.mjs <<'EOF'
+          import http from "node:http";
+          import fs from "node:fs";
+          import { Readable } from "node:stream";
+
+          const activityFile = "/tmp/last-tunnel-request";
+          fs.writeFileSync(activityFile, String(Date.now()));
+
+          http.createServer(async (request, response) => {
+            try {
+              fs.writeFileSync(activityFile, String(Date.now()));
+              console.log(`[request] ${new Date().toISOString()} ${request.method} ${request.url}`);
+
+              const hasBody = request.method !== "GET" && request.method !== "HEAD";
+              const upstream = await fetch(`http://127.0.0.1:9201${request.url}`, {
+                method: request.method,
+                headers: request.headers,
+                body: hasBody ? request : undefined,
+                duplex: hasBody ? "half" : undefined,
+              });
+
+              response.writeHead(upstream.status, Object.fromEntries(upstream.headers));
+              if (upstream.body) {
+                Readable.fromWeb(upstream.body).pipe(response);
+              } else {
+                response.end();
+              }
+            } catch (error) {
+              console.error(`[proxy error] ${error.message}`);
+              if (!response.headersSent) response.writeHead(502);
+              response.end("Elasticsearch is unavailable");
+            }
+          }).listen(9200, "127.0.0.1", () => console.log("Request logger listening on port 9200"));
+          EOF
+          node /tmp/request-logger.mjs &
+
           while true; do
-            current_count=$(curl -sf http://127.0.0.1:20241/metrics | \
-              awk '$1 == "cloudflared_tunnel_total_requests" { total += $2 } END { print total + 0 }')
-            if [ "$current_count" != "$request_count" ]; then
-              request_count="$current_count"
-              last_activity=$(date +%s)
-            fi
-            now=$(date +%s)
-            if [ $((now - last_activity)) -ge 900 ]; then
+            now_ms=$(date +%s000)
+            last_ms=$(cat /tmp/last-tunnel-request)
+            elapsed=$(( (now_ms - last_ms) / 1000 ))
+            remaining=$((900 - elapsed))
+            if [ "$remaining" -le 0 ]; then
               echo "No tunnel requests for 15 minutes; stopping"
               break
             fi
+            printf '[idle timer] %02d:%02d remaining\n' $((remaining / 60)) $((remaining % 60))
             sleep 10
           done
 
