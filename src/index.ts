@@ -1,6 +1,8 @@
 /// <reference path="../worker-configuration.d.ts" />
 
-import { DurableObject } from "cloudflare:workers";
+import {
+  DurableObject
+} from "cloudflare:workers";
 
 const MAX_BODY_BYTES = 1_048_576;
 const STARTUP_TIMEOUT_MS = 5 * 60_000;
@@ -15,22 +17,32 @@ const CORS_HEADERS = {
 
 type StartupState = {
   status: "idle" | "starting" | "ready";
-  startedAt?: number;
-  readyAt?: number;
+  startedAt ? : number;
+  readyAt ? : number;
 };
 
 type WorkflowRunsResponse = {
-  workflow_runs?: Array<{ status?: string }>;
+  workflow_runs ? : Array < {
+    status ? : string
+  } > ;
 };
 
 function withCors(response: Response): Response {
   const headers = new Headers(response.headers);
   for (const [name, value] of Object.entries(CORS_HEADERS)) headers.set(name, value);
-  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
 }
 
 function jsonError(error: string, status: number): Response {
-  return withCors(Response.json({ error }, { status }));
+  return withCors(Response.json({
+    error
+  }, {
+    status
+  }));
 }
 
 function originHeaders(env: Env): Headers {
@@ -40,7 +52,7 @@ function originHeaders(env: Env): Headers {
   });
 }
 
-async function verifyToken(provided: string, expected: string): Promise<boolean> {
+async function verifyToken(provided: string, expected: string): Promise < boolean > {
   const encoder = new TextEncoder();
   const [providedHash, expectedHash] = await Promise.all([
     crypto.subtle.digest("SHA-256", encoder.encode(provided)),
@@ -54,7 +66,7 @@ function bearerToken(request: Request): string {
   return authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
 }
 
-async function readLimitedBody(request: Request): Promise<ArrayBuffer | null> {
+async function readLimitedBody(request: Request): Promise < ArrayBuffer | null > {
   const declaredLength = request.headers.get("Content-Length");
   if (declaredLength !== null) {
     const length = Number(declaredLength);
@@ -80,10 +92,13 @@ async function readLimitedBody(request: Request): Promise<ArrayBuffer | null> {
   return body.buffer;
 }
 
-export class TunnelCoordinator extends DurableObject<Env> {
-  async ensureReady(): Promise<boolean> {
+export class TunnelCoordinator extends DurableObject < Env > {
+  async ensureReady(): Promise < boolean > {
     if (await this.probeOrigin()) {
-      await this.setState({ status: "ready", readyAt: Date.now() });
+      await this.setState({
+        status: "ready",
+        readyAt: Date.now()
+      });
       return true;
     }
 
@@ -92,12 +107,20 @@ export class TunnelCoordinator extends DurableObject<Env> {
     let startedAt = state.startedAt;
     if (state.status !== "starting" || !startedAt || now - startedAt >= STARTUP_TIMEOUT_MS) {
       startedAt = now;
-      await this.setState({ status: "starting", startedAt });
+      await this.setState({
+        status: "starting",
+        startedAt
+      });
       try {
         if (!(await this.hasActiveWorkflow())) await this.dispatchWorkflow();
       } catch (error) {
-        await this.setState({ status: "idle" });
-        console.error(JSON.stringify({ message: "workflow startup failed", error: String(error) }));
+        await this.setState({
+          status: "idle"
+        });
+        console.error(JSON.stringify({
+          message: "workflow startup failed",
+          error: String(error)
+        }));
         throw error;
       }
     }
@@ -106,16 +129,21 @@ export class TunnelCoordinator extends DurableObject<Env> {
     while (Date.now() < deadline) {
       await scheduler.wait(POLL_INTERVAL_MS);
       if (await this.probeOrigin()) {
-        await this.setState({ status: "ready", readyAt: Date.now() });
+        await this.setState({
+          status: "ready",
+          readyAt: Date.now()
+        });
         return true;
       }
     }
 
-    await this.setState({ status: "idle" });
+    await this.setState({
+      status: "idle"
+    });
     return false;
   }
 
-  async markReady(): Promise<void> {
+  async markReady(): Promise < void > {
     const state = await this.getState();
     await this.setState({
       status: "starting",
@@ -124,15 +152,17 @@ export class TunnelCoordinator extends DurableObject<Env> {
     });
   }
 
-  private async getState(): Promise<StartupState> {
-    return (await this.ctx.storage.get<StartupState>("startup")) ?? { status: "idle" };
+  private async getState(): Promise < StartupState > {
+    return (await this.ctx.storage.get < StartupState > ("startup")) ?? {
+      status: "idle"
+    };
   }
 
-  private async setState(state: StartupState): Promise<void> {
+  private async setState(state: StartupState): Promise < void > {
     await this.ctx.storage.put("startup", state);
   }
 
-  private async probeOrigin(): Promise<boolean> {
+  private async probeOrigin(): Promise < boolean > {
     try {
       const response = await fetch(new URL("/", this.env.ORIGIN_URL), {
         headers: originHeaders(this.env),
@@ -160,19 +190,23 @@ export class TunnelCoordinator extends DurableObject<Env> {
     );
   }
 
-  private async hasActiveWorkflow(): Promise<boolean> {
+  private async hasActiveWorkflow(): Promise < boolean > {
     const url = this.workflowUrl("/runs");
     url.searchParams.set("branch", this.env.GITHUB_REF);
     url.searchParams.set("event", "workflow_dispatch");
     url.searchParams.set("per_page", "10");
-    const response = await fetch(url, { headers: this.githubHeaders() });
+    const response = await fetch(url, {
+      headers: this.githubHeaders()
+    });
     if (!response.ok) throw new Error(`GitHub workflow lookup failed with ${response.status}`);
-    const data = await response.json<WorkflowRunsResponse>();
+    const data = await response.json < WorkflowRunsResponse > ();
     const activeStatuses = new Set(["requested", "waiting", "pending", "queued", "in_progress"]);
-    return data.workflow_runs?.some(({ status }) => status !== undefined && activeStatuses.has(status)) ?? false;
+    return data.workflow_runs?.some(({
+      status
+    }) => status !== undefined && activeStatuses.has(status)) ?? false;
   }
 
-  private async dispatchWorkflow(): Promise<void> {
+  private async dispatchWorkflow(): Promise < void > {
     const response = await fetch(this.workflowUrl("/dispatches"), {
       method: "POST",
       headers: this.githubHeaders(),
@@ -191,20 +225,26 @@ export class TunnelCoordinator extends DurableObject<Env> {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env): Promise < Response > {
     const url = new URL(request.url);
     if (request.method === "OPTIONS") {
-      return withCors(new Response(null, { status: 204 }));
+      return withCors(new Response(null, {
+        status: 204
+      }));
     }
     if (request.method === "GET" && url.pathname === "/health") {
-      return withCors(Response.json({ status: "ok" }));
+      return withCors(Response.json({
+        status: "ok"
+      }));
     }
 
     const coordinator = env.TUNNEL_COORDINATOR.getByName(COORDINATOR_NAME);
     if (request.method === "POST" && url.pathname === "/_internal/tunnel-ready") {
       if (!(await verifyToken(bearerToken(request), env.CALLBACK_TOKEN))) return jsonError("unauthorized", 401);
       await coordinator.markReady();
-      return withCors(Response.json({ status: "ready" }));
+      return withCors(Response.json({
+        status: "ready"
+      }));
     }
 
     if (request.method !== "POST" || url.pathname !== "/execute") {
@@ -233,8 +273,12 @@ export default {
       });
       return withCors(new Response(response.body, response));
     } catch (error) {
-      console.error(JSON.stringify({ message: "origin startup or request failed", error: String(error) }));
+      console.error(JSON.stringify({
+        message: "origin startup or request failed",
+        error: String(error)
+      }));
       return jsonError("Elasticsearch is unavailable", 502);
     }
   },
-} satisfies ExportedHandler<Env>;
+}
+satisfies ExportedHandler < Env > ;
