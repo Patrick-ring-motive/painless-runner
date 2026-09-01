@@ -29,8 +29,18 @@ jobs:
           echo '{"max-concurrent-downloads": 10}' | sudo tee /etc/docker/daemon.json
           sudo systemctl restart docker
 
-      - name: Run Elasticsearch container
+      - name: Start Elasticsearch and tunnel in parallel
+        env:
+          CLOUDFLARE_TUNNEL_TOKEN: ${{ inputs.tunnel_token }}
         run: |
+          if [ -z "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
+            echo "CLOUDFLARE_TUNNEL_TOKEN secret must be set"
+            exit 1
+          fi
+
+          STARTED_MS=$(date +%s%3N)
+          echo "SERVICES_STARTED_MS=$STARTED_MS" >> "$GITHUB_ENV"
+
           docker run -d --name es \
             -p 9201:9200 \
             -e discovery.type=single-node \
@@ -44,7 +54,32 @@ jobs:
             -e xpack.security.enrollment.enabled=false \
             -e 'node.roles=["master", "data"]' \
             -e ES_JAVA_OPTS="-Xms512m -Xmx512m -XX:-UseG1GC -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -XX:CICompilerCount=1 -Xrs -XX:+UnlockExperimentalVMOptions -XX:+DisableAttachMechanism" \
-            "${{ env.ES_IMAGE }}"
+            "${{ env.ES_IMAGE }}" &
+          es_pid=$!
+
+          docker run -d --name cf-tunnel --network host \
+            cloudflare/cloudflared:latest \
+            tunnel --metrics 127.0.0.1:20241 --no-autoupdate run \
+            --token "$CLOUDFLARE_TUNNEL_TOKEN" &
+          tunnel_pid=$!
+
+          wait "$es_pid"
+          wait "$tunnel_pid"
+
+          for _ in $(seq 1 300); do
+            if curl -sf http://127.0.0.1:20241/metrics >/dev/null; then
+              break
+            fi
+            if ! docker inspect -f '{{.State.Running}}' cf-tunnel | grep -q true; then
+              docker logs cf-tunnel
+              exit 1
+            fi
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:20241/metrics >/dev/null || (echo "Tunnel failed to start"; docker logs cf-tunnel; exit 1)
+          TUNNEL_READY_MS=$(date +%s%3N)
+          echo "TUNNEL_READY_MS=$TUNNEL_READY_MS" >> "$GITHUB_ENV"
+          echo "Tunnel startup time: $((TUNNEL_READY_MS - STARTED_MS))ms"
 
       - name: Wait for Elasticsearch to be ready
         run: |
@@ -61,37 +96,16 @@ jobs:
 
       - name: Run tunnel until idle
         env:
-          CLOUDFLARE_TUNNEL_TOKEN: ${{ inputs.tunnel_token }}
           CALLBACK_TOKEN: ${{ inputs.callback_token }}
           WORKER_CALLBACK_URL: ${{ inputs.worker_callback_url }}
         run: |
-          if [ -z "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
-            echo "CLOUDFLARE_TUNNEL_TOKEN secret must be set"
-            exit 1
-          fi
           if [ -z "$CALLBACK_TOKEN" ] || [ -z "$WORKER_CALLBACK_URL" ]; then
             echo "CALLBACK_TOKEN secret and WORKER_CALLBACK_URL variable must be set"
             exit 1
           fi
 
           node --version
-
-          docker run -d --name cf-tunnel --network host \
-            cloudflare/cloudflared:latest \
-            tunnel --metrics 127.0.0.1:20241 --no-autoupdate run \
-            --token "$CLOUDFLARE_TUNNEL_TOKEN"
-
-          for _ in $(seq 1 300); do
-            if curl -sf http://127.0.0.1:20241/metrics >/dev/null; then
-              break
-            fi
-            if ! docker inspect -f '{{.State.Running}}' cf-tunnel | grep -q true; then
-              docker logs cf-tunnel
-              exit 1
-            fi
-            sleep 1
-          done
-          curl -sf http://127.0.0.1:20241/metrics >/dev/null || (echo "Tunnel failed to start"; docker logs cf-tunnel; exit 1)
+          echo "Tunnel became ready $((TUNNEL_READY_MS - SERVICES_STARTED_MS))ms after parallel startup began"
 
           cat > /tmp/request-logger.mjs <<'EOF'
           import http from "node:http";
